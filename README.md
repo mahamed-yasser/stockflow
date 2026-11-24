@@ -15,7 +15,7 @@ Needs Node 22 or newer. No packages to install.
 
     npm start                  # http://127.0.0.1:3200
     SEED_DEMO=1 npm start      # same, plus a fictional demo shop on a brand-new database
-    npm test                   # 20 automated tests
+    npm test                   # 21 automated tests
     node docs/e2e.js           # real server + real Chrome run with a restart (needs google-chrome)
 
 First run: open the page and create your account (username, password of at least 10 characters). That form only works while no account exists. There are no default credentials.
@@ -33,3 +33,9 @@ Simultaneous orders for the last units cannot oversell (tested).
 
 ## Limits
 Not security-reviewed; serve over HTTPS before real use (session cookie is not Secure). One user role, no password reset, no barcode scanning, no suppliers or purchase orders, no variants, no tax, no multi-location stock, no returns of individual items from fulfilled orders. One currency per database. Rate limits are in memory per process. Gross profit uses the cost saved on each order line, so it is only as good as the costs you enter.
+
+## Browser demo
+`demo/` is a browser-only demo build: it runs this app's own `core.js` and `server.js` request handler inside the page, with SQLite compiled to WebAssembly ([sql.js](https://github.com/sql-js/sql.js)). Nothing is sent to a server. Each visitor gets their own fictional data, stored in that browser's localStorage, with a "Reset demo data" button. The demo signs in automatically with a built-in demo user and uses a stand-in for password hashing, so it is not a model of the real app's login. Serve the `demo/` folder from any static host. Rebuild it with `node tools/demo-build/build.js` (see the header of that file for arguments).
+
+## Hosting for real use
+Serve it behind HTTPS and set `COOKIE_SECURE=1` so the session cookie is marked Secure. Responses send `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`. Do not expose a fresh database to the internet: the first visitor to open the setup page becomes the owner.
