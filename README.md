@@ -39,3 +39,12 @@ Not security-reviewed; serve over HTTPS before real use (session cookie is not S
 
 ## Hosting for real use
 Serve it behind HTTPS and set `COOKIE_SECURE=1` so the session cookie is marked Secure. Responses send `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`. Do not expose a fresh database to the internet: the first visitor to open the setup page becomes the owner.
+
+## Accounts, audit log and data export (milestone 2, local branch)
+
+- Roles: `owner` (the setup account, and any account that existed before this change) and `staff`. Staff can do daily work (products, stock, orders) and change their own password. Owner only: `GET/POST /api/users` (new accounts default to staff), `GET /api/audit`, `GET /api/backup`, `POST /api/import`.
+- `POST /api/password` with `{current, next}`: checks the current password, needs 10+ characters, signs out the user's other sessions.
+- Audit log: logins, failed logins, successful password changes, and every write request with its HTTP status (written when the response is sent, so rejected attempts show with 403/400). It does not store field values or passwords. Failed password-change attempts are logged too (the reason only, never the passwords).
+- Data export (`GET /api/backup`, an export for your records, not a recoverable backup: there is no restore function yet): JSON of settings, products, movements, orders and order items. Users, password hashes and sessions are left out. There is no restore command yet.
+- UI: the Account page (change password, people, activity log, data export). Owner sees all of it, staff see only change password.
+- Not done: restore, removing or demoting users, password reset.
