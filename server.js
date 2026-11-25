@@ -30,7 +30,7 @@ function createApp(db, { today = () => C.todayOf(db), loginLimit = 5 } = {}) {
           if (!t) { fails.set(ip, { n: f.n + 1, t: Date.now() }); C.audit(db, String(b.username || '?'), 'login_failed'); throw new C.AppError('Wrong username or password', 401); }
           fails.delete(ip); C.audit(db, String(b.username), 'login'); return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': `sid=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${SECURE}` });
         }
-        if (m === 'POST' && p === '/api/logout') return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': 'sid=; Max-Age=0; Path=/' });
+        if (m === 'POST' && p === '/api/logout') { C.logout(db, cookie(req)); return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': 'sid=; Max-Age=0; Path=/' }); }
         const who = C.sessionUser(db, cookie(req)); if (!who) throw new C.AppError('Login required', 401);
         let mm;
         if (m === 'POST' && p === '/api/password') { const b = await readBody(req); try { C.changePassword(db, who.id, b.current, b.next, cookie(req)); } catch (e) { C.audit(db, who.username, 'password_change_failed', e.message); throw e; } return send(res, 200, { ok: true }); } // reason only, never the passwords

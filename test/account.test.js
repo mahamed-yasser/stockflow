@@ -33,3 +33,32 @@ test('http: password endpoint and audit log need a session; login and writes are
     assert.ok(!JSON.stringify(a).includes('second-password-2') && !JSON.stringify(a).includes('first-password-1'));
   } finally { srv.close(); }
 });
+
+test('logout ends the session on the server: the old cookie no longer authorizes, other sessions survive', async () => {
+  const db = C.open(), srv = createApp(db); await new Promise(ok => srv.listen(0, '127.0.0.1', ok));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const s = await fetch(base + '/api/setup', { method: 'POST', body: JSON.stringify({ username: 'owner', password: 'first-password-1' }) });
+    const ck = s.headers.get('set-cookie').split(';')[0], H = { cookie: ck };
+    const other = C.login(db, 'owner', 'first-password-1');
+    assert.strictEqual((await fetch(base + '/api/audit', { headers: H })).status, 200);
+    const out = await fetch(base + '/api/logout', { method: 'POST', headers: H });
+    assert.strictEqual(out.status, 200); assert.match(out.headers.get('set-cookie'), /Max-Age=0/);
+    assert.strictEqual((await fetch(base + '/api/audit', { headers: H })).status, 401);   // replaying the old cookie fails
+    assert.strictEqual(C.sessionUser(db, ck.slice(4)), null);
+    assert.ok(C.sessionUser(db, other));                                                  // a different session is untouched
+    assert.strictEqual((await fetch(base + '/api/logout', { method: 'POST' })).status, 200); // logout without a cookie is harmless
+  } finally { srv.close(); }
+});
+
+test('expired sessions are purged on login, a bounded number at a time; live ones are kept', () => {
+  const db = C.open(); C.createUser(db, 'owner', 'first-password-1');
+  const live = C.login(db, 'owner', 'first-password-1'), uid = C.sessionUser(db, live).id;
+  for (let i = 0; i < 5; i++) db.prepare('INSERT INTO sessions VALUES(?,?,?)').run('old' + i, uid, Date.now() - 1000);
+  assert.strictEqual(C.purgeExpiredSessions(db, Date.now(), 2), 2);                        // limit respected
+  assert.strictEqual(db.prepare('SELECT count(*) n FROM sessions').get().n, 4);
+  C.login(db, 'owner', 'first-password-1');                                               // login purges the rest
+  assert.strictEqual(db.prepare("SELECT count(*) n FROM sessions WHERE expires<=?").get(Date.now()).n, 0);
+  assert.ok(C.sessionUser(db, live));
+  assert.strictEqual(C.purgeExpiredSessions(db), 0);
+});

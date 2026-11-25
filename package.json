@@ -1,1 +1,11 @@
-{"name":"stockflow","version":"1.0.0","description":"Inventory, orders and sales reports for small shops","scripts":{"start":"node --no-warnings server.js","test":"node --no-warnings --test test/*.test.js"}}
+{
+  "name": "stockflow",
+  "version": "1.0.0",
+  "description": "Inventory, orders and sales reports for small shops",
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "test": "node --no-warnings --test test/*.test.js",
+    "coverage": "node --no-warnings --test --experimental-test-coverage test/*.test.js",
+    "bench": "node --no-warnings tools/bench.js"
+  }
+}
