@@ -13,7 +13,9 @@ function open(file = ':memory:') {
   CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY, number TEXT UNIQUE NOT NULL, customer TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'placed' CHECK(status IN('placed','fulfilled','cancelled')), day TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS order_items(id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL REFERENCES orders(id), product_id INTEGER NOT NULL REFERENCES products(id), qty INTEGER NOT NULL CHECK(qty>0), unit_cents INTEGER NOT NULL, cost_cents INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, hash TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires INTEGER NOT NULL);`);
+  CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, at TEXT NOT NULL, username TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');`);
+  if (!db.prepare('PRAGMA table_info(users)').all().some(x => x.name === 'role')) { db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'owner'"); db.exec("UPDATE users SET role='staff' WHERE id<>(SELECT min(id) FROM users)"); } // old versions only ever created one account (the setup one); if a database somehow has more, only the first stays owner
   const tz = process.env.SHOP_TZ || 'Africa/Cairo', cur = (process.env.CURRENCY || 'USD').toUpperCase();
   new Intl.DateTimeFormat('en', { timeZone: tz }); new Intl.NumberFormat('en', { style: 'currency', currency: cur });
   db.prepare("INSERT OR IGNORE INTO settings VALUES('tz',?)").run(tz); db.prepare("INSERT OR IGNORE INTO settings VALUES('currency',?)").run(cur);
@@ -183,8 +185,26 @@ function productLedger(db, id) {
   return { product: { id: p.id, sku: p.sku, name: p.name, stock: p.stock }, movements: rows.reverse().slice(0, 200) };
 }
 // ---- auth ----
-function createUser(db, u, pw) { if (typeof pw !== 'string' || pw.length < 10) throw new Error('Password must be at least 10 characters'); const salt = crypto.randomBytes(16).toString('hex'); db.prepare('INSERT INTO users(username,salt,hash) VALUES(?,?,?)').run(u, salt, crypto.scryptSync(pw, salt, 32).toString('hex')); }
+function createUser(db, u, pw, role = 'owner') { if (!['owner', 'staff'].includes(role)) throw new Error('Role must be owner or staff'); if (typeof pw !== 'string' || pw.length < 10) throw new Error('Password must be at least 10 characters'); const salt = crypto.randomBytes(16).toString('hex'); db.prepare('INSERT INTO users(username,salt,hash,role) VALUES(?,?,?,?)').run(u, salt, crypto.scryptSync(pw, salt, 32).toString('hex'), role); }
 function login(db, u, pw) { const r = db.prepare('SELECT * FROM users WHERE username=?').get(u); if (!r) return null; if (!crypto.timingSafeEqual(crypto.scryptSync(pw, r.salt, 32), Buffer.from(r.hash, 'hex'))) return null; const t = crypto.randomBytes(24).toString('hex'); db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(t, r.id, Date.now() + 8 * 3600e3); return t; }
-const sessionUser = (db, t) => t ? db.prepare('SELECT u.id,u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?').get(t, Date.now()) || null : null;
+const sessionUser = (db, t) => t ? db.prepare('SELECT u.id,u.username,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?').get(t, Date.now()) || null : null;
+
+// ---- password change and audit log ----
+function audit(db, username, action, detail = '') { db.prepare('INSERT INTO audit(at,username,action,detail) VALUES(?,?,?,?)').run(new Date().toISOString(), String(username).slice(0, 40), action, String(detail).slice(0, 200)); }
+const listAudit = (db, limit = 100) => db.prepare('SELECT id,at,username,action,detail FROM audit ORDER BY id DESC LIMIT ?').all(Math.min(Math.max(+limit || 100, 1), 500));
+// Checks the current password, stores the new one, and signs out every other session of that user.
+function changePassword(db, userId, current, next, keepToken) {
+  const r = db.prepare('SELECT * FROM users WHERE id=?').get(userId); if (!r) throw new AppError('User not found', 404);
+  if (typeof current !== 'string' || !crypto.timingSafeEqual(crypto.scryptSync(current, r.salt, 32), Buffer.from(r.hash, 'hex'))) throw new AppError('Current password is wrong', 403);
+  if (typeof next !== 'string' || next.length < 10) throw new AppError('Password must be at least 10 characters');
+  if (next === current) throw new AppError('New password must be different');
+  const salt = crypto.randomBytes(16).toString('hex');
+  db.prepare('UPDATE users SET salt=?, hash=? WHERE id=?').run(salt, crypto.scryptSync(next, salt, 32).toString('hex'), userId);
+  db.prepare('DELETE FROM sessions WHERE user_id=? AND token<>?').run(userId, keepToken || '');
+  audit(db, r.username, 'password_changed');
+}
+const listUsers = db => db.prepare('SELECT id,username,role FROM users ORDER BY id').all();
+// Data backup as JSON. Leaves out users, password hashes and sessions on purpose.
+function backup(db) { const t = n => db.prepare('SELECT * FROM ' + n).all(); return { version: 1, at: new Date().toISOString(), settings: t('settings'), products: t('products'), movements: t('movements'), orders: t('orders'), order_items: t('order_items') }; }
 const needsSetup = db => !db.prepare('SELECT 1 FROM users').get();
-module.exports = { reorderReport, reorderCsv, productLedger, AppError, open, setting, todayOf, listProducts, getProduct, saveProduct, receive, adjust, createOrder, getOrder, listOrders, setOrderStatus, parseCsv, importProducts, productsCsv, movementsCsv, dashboard, createUser, login, sessionUser, needsSetup };
+module.exports = { listUsers, backup, audit, listAudit, changePassword, reorderReport, reorderCsv, productLedger, AppError, open, setting, todayOf, listProducts, getProduct, saveProduct, receive, adjust, createOrder, getOrder, listOrders, setOrderStatus, parseCsv, importProducts, productsCsv, movementsCsv, dashboard, createUser, login, sessionUser, needsSetup };

@@ -27,13 +27,21 @@ function createApp(db, { today = () => C.todayOf(db), loginLimit = 5 } = {}) {
         if (m === 'POST' && p === '/api/login') {
           const f = fails.get(ip) || { n: 0, t: 0 }; if (f.n >= loginLimit && Date.now() - f.t < 60000) throw new C.AppError('Too many attempts, wait a minute', 429);
           const b = await readBody(req), t = C.login(db, String(b.username || ''), String(b.password || ''));
-          if (!t) { fails.set(ip, { n: f.n + 1, t: Date.now() }); throw new C.AppError('Wrong username or password', 401); }
-          fails.delete(ip); return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': `sid=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${SECURE}` });
+          if (!t) { fails.set(ip, { n: f.n + 1, t: Date.now() }); C.audit(db, String(b.username || '?'), 'login_failed'); throw new C.AppError('Wrong username or password', 401); }
+          fails.delete(ip); C.audit(db, String(b.username), 'login'); return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': `sid=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${SECURE}` });
         }
         if (m === 'POST' && p === '/api/logout') return send(res, 200, { ok: true }, 'application/json', { 'Set-Cookie': 'sid=; Max-Age=0; Path=/' });
-        if (!C.sessionUser(db, cookie(req))) throw new C.AppError('Login required', 401);
+        const who = C.sessionUser(db, cookie(req)); if (!who) throw new C.AppError('Login required', 401);
         let mm;
-        if (m === 'GET' && p === '/api/me') return send(res, 200, { ok: true, today: today(), currency: C.setting(db, 'currency'), timezone: C.setting(db, 'tz') });
+        if (m === 'POST' && p === '/api/password') { const b = await readBody(req); try { C.changePassword(db, who.id, b.current, b.next, cookie(req)); } catch (e) { C.audit(db, who.username, 'password_change_failed', e.message); throw e; } return send(res, 200, { ok: true }); } // reason only, never the passwords
+        const owner = () => { if (who.role !== 'owner') throw new C.AppError('Owner only', 403); };
+        if (m !== 'GET') res.on('finish', () => { if (p !== '/api/password') C.audit(db, who.username, 'write', `${p} ${res.statusCode}`); }); // logged when the response is sent, with its status
+        if (m === 'GET' && p === '/api/audit') { owner(); return send(res, 200, { entries: C.listAudit(db, url.searchParams.get('limit')) }); }
+        if (m === 'GET' && p === '/api/users') { owner(); return send(res, 200, { users: C.listUsers(db) }); }
+        if (m === 'POST' && p === '/api/users') { owner(); const b = await readBody(req), u = String(b.username || '').trim(); if (!/^[A-Za-z0-9._-]{3,30}$/.test(u)) throw new C.AppError('Username: 3 to 30 letters, numbers or . _ -'); try { C.createUser(db, u, String(b.password || ''), b.role === 'owner' ? 'owner' : 'staff'); } catch (e) { throw new C.AppError(e.message); } return send(res, 201, { ok: true }); }
+        if (m === 'GET' && p === '/api/backup') { owner(); return send(res, 200, C.backup(db), 'application/json', { 'Content-Disposition': 'attachment; filename="stockflow-data-export.json"' }); }
+        if (m === 'POST' && p === '/api/import') owner();
+        if (m === 'GET' && p === '/api/me') return send(res, 200, { ok: true, username: who.username, role: who.role, today: today(), currency: C.setting(db, 'currency'), timezone: C.setting(db, 'tz') });
         if (m === 'GET' && p === '/api/dashboard') return send(res, 200, C.dashboard(db, today()));
         if (m === 'GET' && p === '/api/products') return send(res, 200, { products: C.listProducts(db) });
         if (m === 'POST' && p === '/api/products') return send(res, 201, { product: C.saveProduct(db, null, await readBody(req), today()) });
