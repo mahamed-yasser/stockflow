@@ -40,6 +40,12 @@ Not security-reviewed; serve over HTTPS before real use (session cookie is not S
 ## Hosting for real use
 Serve it behind HTTPS and set `COOKIE_SECURE=1` so the session cookie is marked Secure. Responses send `X-Frame-Options: DENY` and `Referrer-Policy: no-referrer`. Do not expose a fresh database to the internet: the first visitor to open the setup page becomes the owner.
 
+## Engineering notes
+- [Architecture](docs/ARCHITECTURE.md)
+- [Security notes](docs/SECURITY.md) (what is and is not implemented)
+- [Performance](docs/PERFORMANCE.md) (reproducible benchmark, `npm run bench`)
+- Test coverage: `npm run coverage` (built-in Node coverage, informational; no pass/fail threshold is enforced).
+
 ## Accounts, audit log and data export (milestone 2, local branch)
 
 - Roles: `owner` (the setup account, and any account that existed before this change) and `staff`. Staff can do daily work (products, stock, orders) and change their own password. Owner only: `GET/POST /api/users` (new accounts default to staff), `GET /api/audit`, `GET /api/backup`, `POST /api/import`.
