@@ -9,3 +9,5 @@ jobs:
         with:
           node-version: 22
       - run: npm test
+      - name: Coverage report (informational, no threshold)
+        run: npm run coverage
