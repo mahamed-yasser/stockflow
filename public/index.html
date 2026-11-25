@@ -1,10 +1,10 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StockFlow</title><link rel="stylesheet" href="/style.css"></head><body>
-<header><b>StockFlow</b><nav id="nav" hidden><button data-v="dash" class="on">Dashboard</button><button data-v="prod">Products</button><button data-v="ord">Orders</button><button data-v="re">Reorder</button><button data-v="imp">Import / export</button></nav><button class="ghost sm" id="out" hidden>Log out</button></header>
+<header><b>StockFlow</b><nav id="nav" hidden><button data-v="dash" class="on">Dashboard</button><button data-v="prod">Products</button><button data-v="ord">Orders</button><button data-v="re">Reorder</button><button data-v="imp">Import / export</button><button data-v="acct">Account</button></nav><button class="ghost sm" id="out" hidden>Log out</button></header>
 <main>
 <div id="setup" class="card" style="max-width:420px;margin:30px auto" hidden><h1>Create your account</h1><p class="mut">First run. Choose a username and a password of at least 10 characters. This form only works while no account exists.</p><form id="sf"><label for="su">Username</label><input id="su" autocomplete="username"><label for="sp">Password</label><input id="sp" type="password" autocomplete="new-password"><p id="serr" class="msg err" hidden></p><p><button>Create account</button></p></form></div>
 <div id="login" class="card" style="max-width:380px;margin:40px auto" hidden><h1>Log in</h1><form id="lf"><label for="u">Username</label><input id="u" autocomplete="username"><label for="p">Password</label><input id="p" type="password" autocomplete="current-password"><p id="lerr" class="msg err" hidden></p><p><button>Log in</button></p></form></div>
 <p id="amsg" class="msg" hidden></p>
-<section id="dash" hidden></section><section id="prod" hidden></section><section id="ord" hidden></section><section id="re" hidden></section><section id="imp" hidden></section>
+<section id="dash" hidden></section><section id="prod" hidden></section><section id="ord" hidden></section><section id="re" hidden></section><section id="imp" hidden></section><section id="acct" hidden></section>
 </main><div id="modal" class="modal" hidden></div>
 <script>
 const $=id=>document.getElementById(id);let ENV={},P=[],O=[],pf='all',pq='';
@@ -13,12 +13,12 @@ const api=async(u,body)=>{const o=body===undefined?{}:{method:'POST',body:JSON.s
 const M=c=>new Intl.NumberFormat('en',{style:'currency',currency:ENV.currency||'USD'}).format(c/100);
 const note=(t,ok=true)=>{const m=$('amsg');m.className='msg '+(ok?'ok':'err');m.textContent=t;m.hidden=false;clearTimeout(note.t);note.t=setTimeout(()=>m.hidden=true,6000)};
 const guard=fn=>async(...a)=>{try{await fn(...a)}catch(x){note(x.message,false)}};
-async function boot(){const st=await api('/api/setup-status');['setup','login','dash','prod','ord','re','imp'].forEach(i=>$(i).hidden=true);$('nav').hidden=$('out').hidden=true;
+async function boot(){const st=await api('/api/setup-status');['setup','login','dash','prod','ord','re','imp','acct'].forEach(i=>$(i).hidden=true);$('nav').hidden=$('out').hidden=true;
 if(st.needsSetup){$('setup').hidden=false;return}
 try{ENV=await api('/api/me')}catch{$('login').hidden=false;return}
 $('nav').hidden=$('out').hidden=false;await refresh();view(sessionStorage.v||'dash')}
 async function refresh(){const [a,b]=await Promise.all([api('/api/products'),api('/api/orders')]);P=a.products;O=b.orders}
-function view(v){sessionStorage.v=v;document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));['dash','prod','ord','re','imp'].forEach(s=>$(s).hidden=s!==v);({dash:rDash,prod:rProd,ord:rOrd,re:rRe,imp:rImp})[v]()}
+function view(v){sessionStorage.v=v;document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));['dash','prod','ord','re','imp','acct'].forEach(s=>$(s).hidden=s!==v);({dash:rDash,prod:rProd,ord:rOrd,re:rRe,imp:rImp,acct:rAcct})[v]()}
 $('nav').onclick=e=>{const b=e.target.closest('button');if(b)view(b.dataset.v)};
 $('sf').onsubmit=async e=>{e.preventDefault();try{await api('/api/setup',{username:$('su').value,password:$('sp').value});boot()}catch(x){$('serr').textContent=x.message;$('serr').hidden=false}};
 $('lf').onsubmit=async e=>{e.preventDefault();try{await api('/api/login',{username:$('u').value,password:$('p').value});boot()}catch(x){$('lerr').textContent=x.message;$('lerr').hidden=false}};
@@ -66,6 +66,19 @@ const pl=$('pl');const add=()=>{const r=document.createElement('div');r.classNam
 function calc(){let t=0;pl.querySelectorAll('.pl').forEach(r=>{const p=P.find(x=>x.id==r.querySelector('.ps').value);t+=p.price_cents*(+r.querySelector('.pq').value||0)});$('ot').innerHTML=`<div class="g"><span>Total</span><span>${M(t)}</span></div>`}
 pl.oninput=calc;pl.onclick=e=>{if(e.target.classList.contains('rm')&&pl.children.length>1){e.target.closest('.pl').remove();calc()}};$('ai').onclick=add;add();$('x').onclick=close_;
 $('ok').onclick=async()=>{try{const items=[...pl.querySelectorAll('.pl')].map(r=>({productId:r.querySelector('.ps').value,qty:r.querySelector('.pq').value}));const r=await api('/api/orders',{customer:$('oc').value,items});await after('Order '+r.order.number+' placed, stock updated.')}catch(x){mErr(x)}}}
+
+const WHAT={'/api/products':'product','/api/orders':'order','/api/import':'product import','/api/users':'staff account','/api/clients':'client','/api/invoices':'invoice','/api/business':'business settings','/api/payments':'payment'};
+const say=a=>{if(a.action==='login')return'Logged in';if(a.action==='login_failed')return'Failed login attempt';if(a.action==='password_changed')return'Changed own password';if(a.action==='password_change_failed')return'Password change refused ('+a.detail+')';
+if(a.action==='write'){const m=/^(\S+) (\d+)$/.exec(a.detail)||[];const code=+m[2],path=m[1]||'',k=Object.keys(WHAT).find(x=>path.startsWith(x));const what=k?WHAT[k]:'data';return(code<300?'Saved ':'Refused (HTTP '+code+') change to ')+what+(code<300?' ('+code+')':'')}return a.action+' '+a.detail};
+
+async function rAcct(){const own=ENV.role==='owner';let users=[],au=[];if(own){[users,au]=await Promise.all([api('/api/users').then(d=>d.users),api('/api/audit?limit=30').then(d=>d.entries)])}
+$('acct').innerHTML=`<h1>Account</h1><p class="mut">Signed in as <b>${esc(ENV.username)}</b> (${esc(ENV.role)}).</p>
+<div class="card"><h2>Change password</h2><form id="pf"><label for="pc">Current password</label><input id="pc" type="password" autocomplete="current-password" required><label for="pn">New password (10+ characters)</label><input id="pn" type="password" autocomplete="new-password" minlength="10" required><button>Change password</button></form><p class="mut">Other devices signed in with this account are logged out.</p></div>
+${own?`<div class="card"><h2>People</h2><table><tr><th>Username</th><th>Role</th></tr>${users.map(u=>`<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td></tr>`).join('')}</table><form id="uf"><label for="nu">New staff username</label><input id="nu" required pattern="[A-Za-z0-9._-]{3,30}"><label for="np">Password (10+ characters)</label><input id="np" type="password" autocomplete="new-password" minlength="10" required><button>Add staff account</button></form></div>
+<div class="card"><h2>Activity log</h2><table><tr><th>When</th><th>Who</th><th>What</th></tr>${au.map(a=>`<tr><td>${esc(a.at.replace('T',' ').slice(0,16))}</td><td>${esc(a.username)}</td><td>${esc(say(a))}</td></tr>`).join('')}</table></div>
+<div class="card"><h2>Data export</h2><p class="mut">Downloads your data as a JSON file. It does not include accounts or passwords. This is an export for your records, not a recoverable backup: there is no restore function yet.</p><a class="btn" href="/api/backup" download>Download data export</a></div>`:'<p class="mut">People, the activity log and the data export are for the owner account only.</p>'}`;
+$('pf').onsubmit=guard(async e=>{e.preventDefault();await api('/api/password',{current:$('pc').value,next:$('pn').value});note('Password changed');rAcct()});
+if(own)$('uf').onsubmit=guard(async e=>{e.preventDefault();await api('/api/users',{username:$('nu').value,password:$('np').value});note('Staff account added');rAcct()})}
 function rImp(){$('imp').innerHTML=`<h1>Import / export</h1><div class="card"><h2>Import products from CSV</h2><p class="mut">Columns: <b>sku, name, price</b> and optionally cost, reorder_level, stock. Existing SKUs are updated, new ones created. If <b>stock</b> is given it sets the count. Nothing is saved if any row has an error.</p><textarea id="csv" class="csv" placeholder="sku,name,price,cost,reorder_level,stock&#10;PEN-1,Gel pen,1.5,0.6,50,200"></textarea><p><input type="file" id="file" accept=".csv,text/csv" style="max-width:300px"></p><p id="dmsg" class="msg" hidden></p><div id="rep"></div><div class="actions"><button class="ghost" id="chk">Check file</button><button id="go" disabled>Import</button></div></div>
 <div class="card"><h2>Export</h2><div class="actions"><a class="btn ghost" href="/api/export/products.csv">Products and stock (CSV)</a><a class="btn ghost" href="/api/export/movements.csv">Stock movements (CSV)</a></div></div>`;
 $('file').onchange=async e=>{const f=e.target.files[0];if(f){$('csv').value=await f.text();$('go').disabled=true}};$('csv').oninput=()=>$('go').disabled=true;
