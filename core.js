@@ -186,7 +186,11 @@ function productLedger(db, id) {
 }
 // ---- auth ----
 function createUser(db, u, pw, role = 'owner') { if (!['owner', 'staff'].includes(role)) throw new Error('Role must be owner or staff'); if (typeof pw !== 'string' || pw.length < 10) throw new Error('Password must be at least 10 characters'); const salt = crypto.randomBytes(16).toString('hex'); db.prepare('INSERT INTO users(username,salt,hash,role) VALUES(?,?,?,?)').run(u, salt, crypto.scryptSync(pw, salt, 32).toString('hex'), role); }
-function login(db, u, pw) { const r = db.prepare('SELECT * FROM users WHERE username=?').get(u); if (!r) return null; if (!crypto.timingSafeEqual(crypto.scryptSync(pw, r.salt, 32), Buffer.from(r.hash, 'hex'))) return null; const t = crypto.randomBytes(24).toString('hex'); db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(t, r.id, Date.now() + 8 * 3600e3); return t; }
+function login(db, u, pw) { const r = db.prepare('SELECT * FROM users WHERE username=?').get(u); if (!r) return null; if (!crypto.timingSafeEqual(crypto.scryptSync(pw, r.salt, 32), Buffer.from(r.hash, 'hex'))) return null; purgeExpiredSessions(db); const t = crypto.randomBytes(24).toString('hex'); db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(t, r.id, Date.now() + 8 * 3600e3); return t; }
+// Ends a session on the server. Unknown or missing tokens are ignored.
+const logout = (db, t) => { if (typeof t === 'string' && t) db.prepare('DELETE FROM sessions WHERE token=?').run(t); };
+// Removes up to `limit` expired sessions per call, so one login never does unbounded work. Called on every login.
+const purgeExpiredSessions = (db, now = Date.now(), limit = 200) => Number(db.prepare('DELETE FROM sessions WHERE token IN (SELECT token FROM sessions WHERE expires<=? LIMIT ?)').run(now, limit).changes);
 const sessionUser = (db, t) => t ? db.prepare('SELECT u.id,u.username,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?').get(t, Date.now()) || null : null;
 
 // ---- password change and audit log ----
@@ -207,4 +211,4 @@ const listUsers = db => db.prepare('SELECT id,username,role FROM users ORDER BY 
 // Data backup as JSON. Leaves out users, password hashes and sessions on purpose.
 function backup(db) { const t = n => db.prepare('SELECT * FROM ' + n).all(); return { version: 1, at: new Date().toISOString(), settings: t('settings'), products: t('products'), movements: t('movements'), orders: t('orders'), order_items: t('order_items') }; }
 const needsSetup = db => !db.prepare('SELECT 1 FROM users').get();
-module.exports = { listUsers, backup, audit, listAudit, changePassword, reorderReport, reorderCsv, productLedger, AppError, open, setting, todayOf, listProducts, getProduct, saveProduct, receive, adjust, createOrder, getOrder, listOrders, setOrderStatus, parseCsv, importProducts, productsCsv, movementsCsv, dashboard, createUser, login, sessionUser, needsSetup };
+module.exports = { logout, purgeExpiredSessions, listUsers, backup, audit, listAudit, changePassword, reorderReport, reorderCsv, productLedger, AppError, open, setting, todayOf, listProducts, getProduct, saveProduct, receive, adjust, createOrder, getOrder, listOrders, setOrderStatus, parseCsv, importProducts, productsCsv, movementsCsv, dashboard, createUser, login, sessionUser, needsSetup };
